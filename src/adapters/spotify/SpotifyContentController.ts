@@ -184,9 +184,16 @@ export class SpotifyContentController implements ContentController {
       artistElements = this._getElements<HTMLElement>(SELECTORS.trackShow);
     }
 
-    const artistName = artistElements
-      .map((element) => element.innerText)
-      .join(', ');
+    // Spotify renders more than one copy of the now-playing artist links, so a
+    // plain join produces "Artist A, Artist B, Artist A, Artist B". Collapse to
+    // the distinct names, preserving the order they first appear in.
+    const artistName = Array.from(
+      new Set(
+        artistElements
+          .map((element) => element.innerText.trim())
+          .filter((name) => name.length > 0)
+      )
+    ).join(', ');
 
     const albumCoverUrl = this._getElement<HTMLImageElement>(
       SELECTORS.coverArt
@@ -307,7 +314,9 @@ export class SpotifyContentController implements ContentController {
   }
 
   private _parseQueueRow(row: HTMLElement): QueueItem | null {
-    const titleElement = row.querySelector<HTMLElement>(SELECTORS.queueRowTitle);
+    const titleElement = row.querySelector<HTMLElement>(
+      SELECTORS.queueRowTitle
+    );
     const name = titleElement?.innerText.trim();
 
     if (!name) {
@@ -334,8 +343,7 @@ export class SpotifyContentController implements ContentController {
 
     // The row is wrapped by an element carrying a stable per-row `data-flip-id`,
     // which is the closest thing the queue UI offers to a track identifier.
-    const id =
-      row.closest<HTMLElement>('[data-flip-id]')?.dataset.flipId ?? '';
+    const id = row.closest<HTMLElement>('[data-flip-id]')?.dataset.flipId ?? '';
 
     return {
       track: {
@@ -453,7 +461,9 @@ export class SpotifyContentController implements ContentController {
   }
 
   private _isCurrentTrackLiked(): boolean {
-    const likeButton = this._getElement<HTMLButtonElement>(SELECTORS.likeButton);
+    const likeButton = this._getElement<HTMLButtonElement>(
+      SELECTORS.likeButton
+    );
 
     if (!likeButton) {
       return false;

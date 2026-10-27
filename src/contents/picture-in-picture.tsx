@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Provider } from 'react-redux';
 
+import { POPUP_PORT } from '~constants/port';
 import { sendToContent } from '~core/messaging/sendToContent';
 import { store } from '~store';
 import { PipToggleButton } from '~ui/pip/PipToggleButton';
@@ -82,7 +83,17 @@ const PipTriggerUi = ({ anchor }: PlasmoCSUIProps) => {
 
     sendAnalytic({ name: 'pip_opened' });
 
+    // The background worker treats a POPUP_PORT connection as "a mini player is
+    // visible" and broadcasts OPEN_QUEUE / CLOSE_QUEUE around its lifetime. Only
+    // the toolbar popup used to open this port, so services that can only read
+    // their queue while the queue UI is on screen (Spotify reads it from the DOM
+    // panel, which Spotify only renders while open) reported a single-item queue
+    // in picture-in-picture. Mirroring the popup's port lifecycle here gives the
+    // PiP player the same queue the popup gets.
+    const queuePort = chrome.runtime.connect({ name: POPUP_PORT });
+
     pipWindow.addEventListener('pagehide', () => {
+      queuePort.disconnect();
       setShowButton(true);
       sendAnalytic({ name: 'pip_closed' });
     });
