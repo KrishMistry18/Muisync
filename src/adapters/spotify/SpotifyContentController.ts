@@ -28,6 +28,15 @@ export class SpotifyContentController implements ContentController {
   // Tracks whether *we* opened the queue panel (vs. the user already having it
   // open), so closeQueue only closes a panel we were responsible for opening.
   private _openedQueueForPopup = false;
+  private _lastValidTrack: Track | null = null;
+  private _lastValidQueue: QueueItem[] = [];
+
+  private _isPlaying(): boolean {
+    const playPauseButton = this._getElement<HTMLButtonElement>(
+      SELECTORS.playPauseButton
+    );
+    return playPauseButton?.getAttribute('aria-label') === 'Pause';
+  }
 
   public play(): void {
     const playPauseButton = this._getElement<HTMLButtonElement>(
@@ -176,7 +185,8 @@ export class SpotifyContentController implements ContentController {
   }
 
   public getCurrentTrack(): Track | null {
-    const name = this._getElement<HTMLElement>(SELECTORS.trackTitle)?.innerText;
+    const titleElement = this._getElement<HTMLElement>(SELECTORS.trackTitle);
+    const name = titleElement?.innerText?.trim();
 
     let artistElements = this._getElements<HTMLElement>(SELECTORS.trackArtist);
 
@@ -205,12 +215,32 @@ export class SpotifyContentController implements ContentController {
       : 0;
 
     if (!name) {
+      // If Spotify temporarily fails to provide metadata during a transition while playback is active,
+      // return the last valid track to prevent UI flicker or false "No Music Playing" state.
+      if (this._isPlaying() && this._lastValidTrack) {
+        return this._lastValidTrack;
+      }
+      this._lastValidTrack = null;
       return null;
     }
 
-    return {
-      // The web player UI doesn't expose the track ID, so we leave it blank.
-      id: '',
+    // Attempt to extract track ID from a link in the now playing widget
+    let id = '';
+    const trackLink =
+      titleElement?.closest('a') ??
+      this._getElement<HTMLAnchorElement>(
+        '[data-testid="now-playing-widget"] a[href*="/track/"], [data-testid="now-playing-widget"] a[href*="/episode/"]'
+      );
+    const href = trackLink?.getAttribute('href') ?? '';
+    const match = href.match(/\/(?:track|episode)\/([a-zA-Z0-9]+)/);
+    if (match?.[1]) {
+      id = match[1];
+    } else {
+      id = `${name}-${artistName}`;
+    }
+
+    const track: Track = {
+      id,
       name,
       artistName,
       albumName: '',
@@ -219,58 +249,156 @@ export class SpotifyContentController implements ContentController {
       isLiked: this._isCurrentTrackLiked(),
       type: this._getElements(SELECTORS.trackShow).length ? 'podcast' : 'song'
     };
+
+    this._lastValidTrack = track;
+    return track;
   }
 
   /**
    * Spotify only renders the queue panel (`aside[aria-label="Queue"]`) while the
    * user has it open. When it's open we parse the full "Now playing" + "Next up"
-   * list; otherwise we fall back to reporting just the currently-playing track so
-   * downstream consumers always have something to show.
+   * list and cache it. When closed or temporarily unmounted, we preserve the last
+   * known valid queue, keeping the active playback status in sync, rather than
+   * wiping out the queue.
    */
   public getQueue(): QueueItem[] {
     const queuePanel = this._getElement(SELECTORS.queuePanel);
 
-    if (!queuePanel) {
-      const currentTrack = this.getCurrentTrack();
+    if (queuePanel) {
+      const rows = Array.from(
+        queuePanel.querySelectorAll<HTMLElement>(SELECTORS.queueRow)
+      );
 
-      return currentTrack ? [{ track: currentTrack, isPlaying: true }] : [];
+      const parsedQueue = rows
+        .map((row) => this._parseQueueRow(row))
+        .filter((item): item is QueueItem => item !== null);
+
+      if (parsedQueue.length > 0) {
+        this._lastValidQueue = parsedQueue;
+        return parsedQueue;
+      }
     }
 
-    const rows = Array.from(
-      queuePanel.querySelectorAll<HTMLElement>(SELECTORS.queueRow)
-    );
+    const isPlaying = this._isPlaying();
+    const currentTrack = this.getCurrentTrack();
 
-    return rows
-      .map((row) => this._parseQueueRow(row))
-      .filter((item): item is QueueItem => item !== null);
+    if (this._lastValidQueue.length > 0) {
+      return this._lastValidQueue.map((item) => ({
+        ...item,
+        isPlaying:
+          isPlaying &&
+          Boolean(
+            currentTrack &&
+              item.track &&
+              (item.track.id
+                ? item.track.id === currentTrack.id
+                : item.track.name === currentTrack.name)
+          )
+      }));
+    }
+
+    return currentTrack ? [{ track: currentTrack, isPlaying }] : [];
   }
 
   /**
-   * Each queue row sits inside a wrapper carrying a stable `data-flip-id`, which
-   * we surface as the track ID. To play a queue item we find the row with the
-   * matching flip ID and click its play button, falling back to restarting the
-   * current track when it's the one requested.
+   * Selects and plays an item from the queue using Spotify's player controls.
+   * Ensures the queue panel is open, locates the corresponding row (by flip ID,
+   * title, or duplicate index), triggers hover to reveal the play button, and
+   * falls back to double-clicking the row.
    */
-  public playQueueTrack(id: string): void {
+  public async playQueueTrack(id: string, duplicateIndex = 0): Promise<void> {
+    if (!this._isQueueOpen()) {
+      this.openQueue();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
     const queuePanel = this._getElement(SELECTORS.queuePanel);
 
-    if (queuePanel && id) {
-      const wrapper = queuePanel.querySelector<HTMLElement>(
-        `[data-flip-id="${CSS.escape(id)}"]`
-      );
-      const playButton = wrapper?.querySelector<HTMLButtonElement>(
-        SELECTORS.queueRowPlayButton
+    if (queuePanel) {
+      const rows = Array.from(
+        queuePanel.querySelectorAll<HTMLElement>(SELECTORS.queueRow)
       );
 
-      if (playButton) {
-        playButton.click();
+      let targetRow: HTMLElement | null = null;
+      if (id) {
+        const matchingRows = rows.filter((r) => {
+          const flipId =
+            r.dataset.flipId ??
+            r.closest<HTMLElement>('[data-flip-id]')?.dataset.flipId ??
+            r.querySelector<HTMLElement>('[data-flip-id]')?.dataset.flipId;
+          return flipId === id;
+        });
+        if (matchingRows.length > 0) {
+          targetRow = matchingRows[duplicateIndex] ?? matchingRows[0];
+        }
+      }
+
+      if (!targetRow && id) {
+        const matchingRows = rows.filter((r) => {
+          const title = r
+            .querySelector<HTMLElement>(SELECTORS.queueRowTitle)
+            ?.innerText.trim();
+          return title === id || `${title}`.includes(id);
+        });
+        if (matchingRows.length > 0) {
+          targetRow = matchingRows[duplicateIndex] ?? matchingRows[0];
+        }
+      }
+
+      if (!targetRow && duplicateIndex >= 0 && duplicateIndex < rows.length) {
+        targetRow = rows[duplicateIndex];
+      }
+
+      if (targetRow) {
+        targetRow.dispatchEvent(
+          new MouseEvent('mouseenter', {
+            bubbles: true,
+            cancelable: true,
+            view: window
+          })
+        );
+        targetRow.dispatchEvent(
+          new MouseEvent('mouseover', {
+            bubbles: true,
+            cancelable: true,
+            view: window
+          })
+        );
+
+        const playButton =
+          targetRow.querySelector<HTMLButtonElement>(
+            SELECTORS.queueRowPlayButton
+          ) ??
+          targetRow.querySelector<HTMLButtonElement>(
+            'button[data-testid*="play"]'
+          ) ??
+          targetRow.querySelector<HTMLButtonElement>(
+            'button[aria-label^="Play"]'
+          );
+
+        if (playButton) {
+          playButton.click();
+          return;
+        }
+
+        const clickTarget =
+          targetRow.querySelector<HTMLElement>(SELECTORS.queueRowTitle) ??
+          targetRow;
+        clickTarget.dispatchEvent(
+          new MouseEvent('dblclick', {
+            bubbles: true,
+            cancelable: true,
+            view: window
+          })
+        );
+        clickTarget.click();
         return;
       }
     }
 
     const currentTrack = this.getCurrentTrack();
 
-    if (currentTrack && currentTrack.id === id) {
+    if (currentTrack && (currentTrack.id === id || currentTrack.name === id)) {
       this.seekTo(0);
     }
   }
@@ -341,9 +469,18 @@ export class SpotifyContentController implements ContentController {
     const isPlaying =
       playButton?.getAttribute('aria-label')?.startsWith('Pause') ?? false;
 
-    // The row is wrapped by an element carrying a stable per-row `data-flip-id`,
-    // which is the closest thing the queue UI offers to a track identifier.
-    const id = row.closest<HTMLElement>('[data-flip-id]')?.dataset.flipId ?? '';
+    // Check row, ancestors, or descendants for data-flip-id
+    const flipId =
+      row.dataset.flipId ??
+      row.closest<HTMLElement>('[data-flip-id]')?.dataset.flipId ??
+      row.querySelector<HTMLElement>('[data-flip-id]')?.dataset.flipId;
+
+    const rowTrackLink = row.querySelector<HTMLAnchorElement>(
+      'a[href*="/track/"], a[href*="/episode/"]'
+    );
+    const href = rowTrackLink?.getAttribute('href') ?? '';
+    const match = href.match(/\/(?:track|episode)\/([a-zA-Z0-9]+)/);
+    const id = flipId ?? match?.[1] ?? `${name}-${artistName}`;
 
     return {
       track: {

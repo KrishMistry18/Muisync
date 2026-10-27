@@ -37,6 +37,29 @@ const musicServiceTabsSlice = createSlice({
       const { tabId, playbackState } = action.payload;
       const index = state.findIndex((tab) => tab.tabId === tabId);
       if (index !== -1) {
+        if (playbackState) {
+          const existingQueue = state[index].playbackState?.queue;
+          if (
+            existingQueue &&
+            existingQueue.length > 1 &&
+            (!playbackState.queue || playbackState.queue.length <= 1)
+          ) {
+            const isPlaying = playbackState.isPlaying;
+            const currentTrack = state[index].currentTrack;
+            playbackState.queue = existingQueue.map((item) => ({
+              ...item,
+              isPlaying:
+                isPlaying &&
+                Boolean(
+                  currentTrack &&
+                    item.track &&
+                    (item.track.id
+                      ? item.track.id === currentTrack.id
+                      : item.track.name === currentTrack.name)
+                )
+            }));
+          }
+        }
         state[index].playbackState = playbackState;
       }
     },

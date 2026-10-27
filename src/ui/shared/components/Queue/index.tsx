@@ -30,14 +30,14 @@ export const Queue = ({
     <div>
       <QueueList>
         {queueItems.map(({ track, isPlaying }, index) => (
-          <div>
+          <div key={track?.id ? `${track.id}-${index}` : index}>
             <TrackListItem
               active={isPlaying}
               documentContainer={documentContainer}
               imageAlt={`Album cover for ${track?.albumName}`}
               imageIconOverlay={isPlaying ? 'playing' : 'play'}
               imageUrl={track?.albumCoverUrl ?? ''}
-              key={index}
+              onClick={() => track && handlePlayQueueTrack(track?.id, index)}
               onImageClick={() =>
                 track && handlePlayQueueTrack(track?.id, index)
               }

@@ -8,6 +8,9 @@ import type { SpotifyContentController } from './SpotifyContentController';
 const NOW_PLAYING_BAR_SELECTOR = '[data-testid="now-playing-bar"]';
 
 export class SpotifyObserver implements ContentObserver {
+  private _lastReportedTrackName: string | null = null;
+  private _lastReportedTrackId: string | null = null;
+
   constructor(private _controller: SpotifyContentController) {}
 
   public async observe(): Promise<void> {
@@ -15,6 +18,9 @@ export class SpotifyObserver implements ContentObserver {
 
     this._setupPlaybackStateObserver(nowPlayingBar);
     this._setupTrackObserver(nowPlayingBar);
+
+    await this._handleTrackUpdated();
+    await this._handlePlaybackUpdated();
   }
 
   /**
@@ -47,6 +53,7 @@ export class SpotifyObserver implements ContentObserver {
   /**
    * Track changes swap the cover art / title / artist nodes, and liking a track
    * flips the like button's aria-label. Both happen inside the now-playing bar.
+   * characterData ensures text node changes inside existing elements are captured.
    */
   private _setupTrackObserver(nowPlayingBar: Element): void {
     const observer = new MutationObserver(() => {
@@ -56,17 +63,32 @@ export class SpotifyObserver implements ContentObserver {
     observer.observe(nowPlayingBar, {
       subtree: true,
       childList: true,
+      characterData: true,
       attributeFilter: ['aria-label', 'aria-checked', 'src']
     });
   }
 
   private async _handleTrackUpdated(): Promise<void> {
     const currentTrack = await this._controller.getCurrentTrack();
+    this._lastReportedTrackId = currentTrack?.id ?? null;
+    this._lastReportedTrackName = currentTrack?.name ?? null;
     await updateCurrentTrack(currentTrack);
   }
 
   private async _handlePlaybackUpdated(): Promise<void> {
     const playerState = await this._controller.getPlayerState();
     await updatePlaybackState(playerState);
+
+    // If current track was not yet populated or if the track name/id has changed,
+    // trigger a track update to ensure metadata stays in sync with playback.
+    const currentTrack = await this._controller.getCurrentTrack();
+    if (
+      currentTrack &&
+      (this._lastReportedTrackName === null ||
+        currentTrack.name !== this._lastReportedTrackName ||
+        (currentTrack.id && currentTrack.id !== this._lastReportedTrackId))
+    ) {
+      await this._handleTrackUpdated();
+    }
   }
 }
