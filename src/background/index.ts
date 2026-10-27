@@ -3,6 +3,7 @@ import { broadcast, getHubMap, startHub } from '@plasmohq/messaging/pub-sub';
 import { POPUP_PORT } from '~constants/port';
 import { MusicControllerMessage } from '~types';
 
+import { initializeCommandsHandler } from './commands';
 import { initializeInstallHandler } from './createInstallHandler';
 import { registerHubMessageHandlers } from './registerHubMessageHandlers';
 import { updateMusicServiceTabs } from './updateMusicServiceTabs';
@@ -10,6 +11,7 @@ import { updateMusicServiceTabs } from './updateMusicServiceTabs';
 startHub();
 updateMusicServiceTabs();
 initializeInstallHandler();
+initializeCommandsHandler();
 
 /**
  * Broadcast a control message to all music service content scripts. Used to tell

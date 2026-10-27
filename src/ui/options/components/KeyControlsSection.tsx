@@ -1,4 +1,5 @@
-import { Stack, Switch } from '@synqapp/ui';
+import { Button, Stack, Switch, token } from '@synqapp/ui';
+import { styled } from 'styled-components';
 
 import { useAppDispatch, useAppSelector } from '~store';
 import {
@@ -34,6 +35,10 @@ export const KeyControlsSection = () => {
     });
   };
 
+  const handleCustomiseKeyboardShortcuts = () => {
+    chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
+  };
+
   return (
     <OptionsSection title="Key controls">
       <Stack direction="column" spacing="sm">
@@ -49,7 +54,21 @@ export const KeyControlsSection = () => {
         >
           Enable music service key controls
         </Switch>
+        <ButtonContainer>
+          <Button
+            size="medium"
+            rounded
+            onClick={handleCustomiseKeyboardShortcuts}
+            aria-label="Customise keyboard shortcuts"
+          >
+            Customise keyboard shortcuts
+          </Button>
+        </ButtonContainer>
       </Stack>
     </OptionsSection>
   );
 };
+
+const ButtonContainer = styled.div`
+  margin-top: ${token('spacing.xs')};
+`;
