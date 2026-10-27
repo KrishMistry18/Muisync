@@ -49,7 +49,9 @@ export const useQueue = (startAt: 'top' | 'next', count?: number) => {
       queue,
       (item) => item.track?.id === trackId
     );
-    const duplicateIndex = trackIndexes.indexOf(trackIndex);
+    const rawDuplicateIndex = trackIndexes.indexOf(trackIndex);
+    const duplicateIndex =
+      rawDuplicateIndex !== -1 ? rawDuplicateIndex : trackIndex;
 
     sendToContent(
       {

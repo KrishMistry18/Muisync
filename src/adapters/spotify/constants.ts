@@ -7,10 +7,13 @@ export const SELECTORS = {
   volumeBar: 'div[data-testid="volume-bar"]',
   progressBar: 'div[data-testid="playback-progressbar"]',
   playbackPosition: 'div[data-testid="playback-position"]',
-  trackTitle: 'div[data-testid="context-item-info-title"]',
-  trackArtist: 'a[data-testid="context-item-info-artist"]',
+  trackTitle:
+    '[data-testid="context-item-info-title"], [data-testid="now-playing-widget"] [data-testid="context-item-link"], [data-testid="now-playing-widget"] a[href*="/track/"], [data-testid="now-playing-widget"] a[href*="/episode/"]',
+  trackArtist:
+    'a[data-testid="context-item-info-artist"], [data-testid="context-item-info-subtitles"] a, [data-testid="now-playing-widget"] a[href*="/artist/"]',
   trackShow: 'a[data-testid="context-item-info-show"]',
-  coverArt: 'img[data-testid="cover-art-image"]',
+  coverArt:
+    'img[data-testid="cover-art-image"], [data-testid="now-playing-widget"] img',
   // The like/save button has no data-testid and its aria-label changes between
   // states ("Add to Liked Songs" when unsaved, "Add to playlist" when saved),
   // so we match the only checkbox-style button inside the now-playing widget and
@@ -19,11 +22,12 @@ export const SELECTORS = {
   // The queue panel only exists in the DOM while the user has it open.
   queueButton: 'button[data-testid="control-button-queue"]',
   queuePanel: 'aside[aria-label="Queue"]',
-  queueRow: 'li[role="row"]',
+  queueRow: '[role="row"]',
   queueRowImage: 'img[data-testid="entity-image"]',
-  queueRowPlayButton: 'button[data-testid="play-button"]',
-  queueRowTitle: 'p[data-encore-id="listRowTitle"]',
-  queueRowSubtitle: 'p[data-encore-id="listRowSubtitle"]',
+  queueRowPlayButton:
+    'button[data-testid="play-button"], button[data-testid="row-play-button"], button[aria-label^="Play"]',
+  queueRowTitle: '[data-encore-id="listRowTitle"]',
+  queueRowSubtitle: '[data-encore-id="listRowSubtitle"]',
   // Track/album/artist detail-page header. These elements live in the page
   // header (not the now-playing bar), so they describe the page being viewed
   // regardless of what's playing. Used to build redirect link details.
