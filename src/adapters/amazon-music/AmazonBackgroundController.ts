@@ -1,3 +1,4 @@
+import { AMAZON_MUSIC_URL_MATCHES } from '~constants/urls';
 import type {
   AlbumSearchResult,
   ArtistSearchResult,
@@ -19,14 +20,145 @@ import type {
 } from './types';
 
 const SEARCH_ENDPOINT = 'https://na.mesk.skill.music.a2z.com/api/showSearch';
+const DEFAULT_DOMAIN = 'music.amazon.com';
+
+const CONFIRMED_DOMAINS = new Set([
+  'music.amazon.com',
+  'music.amazon.co.uk',
+  'music.amazon.ca',
+  'music.amazon.in',
+  'music.amazon.com.au',
+  'music.amazon.co.jp'
+]);
+
+const extractDomainFromUrl = (urlString?: string | null): string | null => {
+  if (!urlString) {
+    return null;
+  }
+  try {
+    const url = new URL(urlString);
+    const hostname = url.hostname.toLowerCase();
+    if (CONFIRMED_DOMAINS.has(hostname)) {
+      return hostname;
+    }
+  } catch {
+    // Malformed URL, handle safely without crashing
+  }
+  return null;
+};
 
 export class AmazonBackgroundController implements BackgroundController {
+  private _sourceTabId?: number | null;
+  private _sourceDomain?: string | null;
+
+  constructor(sourceTabId?: number | null, sourceDomain?: string | null) {
+    this._sourceTabId = sourceTabId;
+    this._sourceDomain = sourceDomain;
+  }
+
+  public setSourceTabId(tabId: number | null): void {
+    this._sourceTabId = tabId;
+  }
+
+  public setSourceDomain(domain: string | null): void {
+    this._sourceDomain = domain;
+  }
+
+  public async resolveDomain(): Promise<string> {
+    if (this._sourceDomain) {
+      const parsed = extractDomainFromUrl(`https://${this._sourceDomain}`);
+      if (parsed) {
+        return parsed;
+      }
+    }
+
+    if (typeof this._sourceTabId === 'number') {
+      try {
+        if (typeof chrome !== 'undefined' && chrome.tabs?.get) {
+          const tab = await chrome.tabs.get(this._sourceTabId);
+          const domain = extractDomainFromUrl(tab?.url);
+          if (domain) {
+            return domain;
+          }
+        }
+      } catch {
+        // Tab not found or inaccessible; fall through
+      }
+    }
+
+    try {
+      if (typeof chrome !== 'undefined' && chrome.tabs?.query) {
+        // 1. Prefer active tab in currently focused window
+        const focusedTabs = await chrome.tabs.query({
+          active: true,
+          lastFocusedWindow: true,
+          url: AMAZON_MUSIC_URL_MATCHES
+        });
+        if (focusedTabs && focusedTabs.length > 0) {
+          const domain = extractDomainFromUrl(focusedTabs[0].url);
+          if (domain) {
+            return domain;
+          }
+        }
+
+        const tabs = await chrome.tabs.query({
+          url: AMAZON_MUSIC_URL_MATCHES
+        });
+
+        if (tabs && tabs.length > 0) {
+          if (tabs.length === 1) {
+            const domain = extractDomainFromUrl(tabs[0].url);
+            if (domain) {
+              return domain;
+            }
+          }
+
+          // When multiple tabs are open, avoid arbitrary selection (tabs[0]):
+          // 2. Prefer any active tab
+          const activeTab = tabs.find((tab) => tab.active);
+          if (activeTab) {
+            const domain = extractDomainFromUrl(activeTab.url);
+            if (domain) {
+              return domain;
+            }
+          }
+
+          // 3. Prefer currently audible tab
+          const audibleTab = tabs.find((tab) => tab.audible);
+          if (audibleTab) {
+            const domain = extractDomainFromUrl(audibleTab.url);
+            if (domain) {
+              return domain;
+            }
+          }
+
+          // 4. Prefer most recently accessed tab
+          const sorted = [...tabs].sort(
+            (a, b) =>
+              ((b as any).lastAccessed ?? 0) - ((a as any).lastAccessed ?? 0)
+          );
+          for (const tab of sorted) {
+            const domain = extractDomainFromUrl(tab.url);
+            if (domain) {
+              return domain;
+            }
+          }
+        }
+      }
+    } catch {
+      // Degrade gracefully
+    }
+
+    return DEFAULT_DOMAIN;
+  }
+
   public async searchTracks(
     input: SearchTracksInput
   ): Promise<TrackSearchResult[]> {
+    const domain = await this.resolveDomain();
     const query = `${input.name} ${input.artistName}`;
 
-    const response = await this._search(query);
+    const response = await this._search(query, domain);
     const widgets = response?.methods?.[0]?.template?.widgets;
     const songsWidget = widgets?.find(
       (widget: any) => widget.header === 'Songs'
@@ -36,7 +168,7 @@ export class AmazonBackgroundController implements BackgroundController {
     const searchResults = tracks?.map((track: any) => ({
       name: track.primaryText.text,
       artistName: track.secondaryText,
-      link: `https://music.amazon.com${track.primaryLink.deeplink}`
+      link: `https://${domain}${track.primaryLink.deeplink}`
     }));
 
     return searchResults ?? [];
@@ -45,9 +177,10 @@ export class AmazonBackgroundController implements BackgroundController {
   public async searchAlbums(
     searchInput: SearchAlbumsInput
   ): Promise<AlbumSearchResult[]> {
+    const domain = await this.resolveDomain();
     const query = `${searchInput.name} ${searchInput.artistName}`;
 
-    const response = await this._search(query);
+    const response = await this._search(query, domain);
     const widgets = response?.methods?.[0]?.template?.widgets;
     const albumsWidget = widgets?.find(
       (widget: any) => widget.header === 'Albums'
@@ -57,7 +190,7 @@ export class AmazonBackgroundController implements BackgroundController {
     const searchResults = albums?.map((album: any) => ({
       name: album.primaryText.text,
       artistName: album.secondaryText,
-      link: `https://music.amazon.com${album.primaryLink.deeplink}`
+      link: `https://${domain}${album.primaryLink.deeplink}`
     }));
 
     return searchResults ?? [];
@@ -66,7 +199,8 @@ export class AmazonBackgroundController implements BackgroundController {
   public async searchArtists(
     searchInput: SearchArtistsInput
   ): Promise<ArtistSearchResult[]> {
-    const response = await this._search(searchInput.name);
+    const domain = await this.resolveDomain();
+    const response = await this._search(searchInput.name, domain);
     const widgets = response?.methods?.[0]?.template?.widgets;
 
     const artistsWidget = widgets?.find(
@@ -77,45 +211,51 @@ export class AmazonBackgroundController implements BackgroundController {
 
     const searchResults = artists?.map((album: any) => ({
       name: album.primaryText.text,
-      link: `https://music.amazon.com${album.primaryLink.deeplink}`
+      link: `https://${domain}${album.primaryLink.deeplink}`
     }));
 
     return searchResults ?? [];
   }
 
   public parseLink(link: string): ParsedLink | null {
-    const parsedLink: Partial<ParsedLink> = {
-      musicService: 'AMAZONMUSIC'
-    };
+    try {
+      const parsedLink: Partial<ParsedLink> = {
+        musicService: 'AMAZONMUSIC'
+      };
 
-    const url = new URL(link);
-    const path = url.pathname;
-    const pathParts = path.split('/').filter((part) => part !== '');
-    const query = url.searchParams;
+      const url = new URL(link);
+      const path = url.pathname;
+      const pathParts = path.split('/').filter((part) => part !== '');
+      const query = url.searchParams;
 
-    if (pathParts[0] === 'albums') {
-      if (query.has('trackAsin')) {
-        const trackId = query.get('trackAsin');
-        parsedLink.trackId = trackId || '';
-        parsedLink.albumId = pathParts[1];
-        parsedLink.type = 'TRACK';
-      } else {
-        parsedLink.albumId = pathParts[1];
-        parsedLink.type = 'ALBUM';
+      if (pathParts[0] === 'albums') {
+        if (query.has('trackAsin')) {
+          const trackId = query.get('trackAsin');
+          parsedLink.trackId = trackId || '';
+          parsedLink.albumId = pathParts[1];
+          parsedLink.type = 'TRACK';
+        } else {
+          parsedLink.albumId = pathParts[1];
+          parsedLink.type = 'ALBUM';
+        }
+      } else if (pathParts[0] === 'artists') {
+        parsedLink.artistId = pathParts[1];
+        parsedLink.type = 'ARTIST';
       }
-    } else if (pathParts[0] === 'artists') {
-      parsedLink.artistId = pathParts[1];
-      parsedLink.type = 'ARTIST';
-    }
 
-    return parsedLink.albumId || parsedLink.artistId || parsedLink.trackId
-      ? (parsedLink as ParsedLink)
-      : null;
+      return parsedLink.albumId || parsedLink.artistId || parsedLink.trackId
+        ? (parsedLink as ParsedLink)
+        : null;
+    } catch {
+      return null;
+    }
   }
 
   public getLink(parsedLink: ParsedLink): string {
     const { type } = parsedLink;
-    const baseUrl = AmazonAdapter.baseUrl;
+    const baseUrl = this._sourceDomain
+      ? `https://${this._sourceDomain}`
+      : AmazonAdapter.baseUrl.replace(/\/$/, '');
 
     if (type === 'ALBUM') {
       return `${baseUrl}/albums/${parsedLink.albumId}`;
@@ -128,8 +268,11 @@ export class AmazonBackgroundController implements BackgroundController {
     }
   }
 
-  private async _search(query: string): Promise<NativeAmazonMusicSearchResult> {
-    const config = await this._fetchConfig();
+  private async _search(
+    query: string,
+    domain: string
+  ): Promise<NativeAmazonMusicSearchResult> {
+    const config = await this._fetchConfig(domain);
 
     const headers = {
       accept: '*/*',
@@ -156,7 +299,7 @@ export class AmazonBackgroundController implements BackgroundController {
 
     const body = {
       filter,
-      headers: this._createBodyHeaders(config, query),
+      headers: this._createBodyHeaders(config, query, domain),
       keyword,
       userHash,
       suggestedKeyword: query
@@ -164,7 +307,7 @@ export class AmazonBackgroundController implements BackgroundController {
 
     const response = await fetch(SEARCH_ENDPOINT, {
       headers,
-      referrer: 'https://music.amazon.com/',
+      referrer: `https://${domain}/`,
       referrerPolicy: 'strict-origin-when-cross-origin',
       body: JSON.stringify(body),
       method: 'POST',
@@ -175,43 +318,25 @@ export class AmazonBackgroundController implements BackgroundController {
     return response;
   }
 
-  private async _fetchConfig(): Promise<AmznMusic['appConfig']> {
-    const htmlResponse = await fetch('https://music.amazon.com/', {
+  private async _fetchConfig(domain: string): Promise<AmznMusic['appConfig']> {
+    const htmlResponse = await fetch(`https://${domain}/`, {
       credentials: 'omit'
     }).then((res) => res.text());
 
-    const accessTokenMatch = htmlResponse.matchAll(
-      /\"accessToken\": \"(.*)\",?/g
-    );
-    const accessToken = accessTokenMatch.next().value[1];
+    const extractRegex = (regex: RegExp): string => {
+      const match = htmlResponse.matchAll(regex).next();
+      return match.value?.[1] ?? '';
+    };
 
-    const customerIdMatch = htmlResponse.matchAll(
-      /\"customerId\": \"(.*)\",?/g
-    );
-    const customerId = customerIdMatch.next().value[1];
-
-    const csrfTokenMatch = htmlResponse.matchAll(/\"token\": \"(.*)\",?/g);
-    const csrfToken = csrfTokenMatch.next().value[1];
-
-    const csrfTsMatch = htmlResponse.matchAll(/\"ts\": \"(.*)\",?/g);
-    const csrfTs = csrfTsMatch.next().value[1];
-
-    const csrfRndMatch = htmlResponse.matchAll(/\"rnd\": \"(.*)\",?/g);
-    const csrfRnd = csrfRndMatch.next().value[1];
-
-    const deviceIdMatch = htmlResponse.matchAll(/\"deviceId\": \"(.*)\",?/g);
-    const deviceId = deviceIdMatch.next().value[1];
-
-    const displayLanguageMatch = htmlResponse.matchAll(
-      /\"displayLanguage\": \"(.*)\",?/g
-    );
-    const displayLanguage = displayLanguageMatch.next().value[1];
-
-    const sessionIdMatch = htmlResponse.matchAll(/\"sessionId\": \"(.*)\",?/g);
-    const sessionId = sessionIdMatch.next().value[1];
-
-    const versionMatch = htmlResponse.matchAll(/\"version\": \"(.*)\",?/g);
-    const version = versionMatch.next().value[1];
+    const accessToken = extractRegex(/\"accessToken\": \"(.*)\",?/g);
+    const customerId = extractRegex(/\"customerId\": \"(.*)\",?/g);
+    const csrfToken = extractRegex(/\"token\": \"(.*)\",?/g);
+    const csrfTs = extractRegex(/\"ts\": \"(.*)\",?/g);
+    const csrfRnd = extractRegex(/\"rnd\": \"(.*)\",?/g);
+    const deviceId = extractRegex(/\"deviceId\": \"(.*)\",?/g);
+    const displayLanguage = extractRegex(/\"displayLanguage\": \"(.*)\",?/g);
+    const sessionId = extractRegex(/\"sessionId\": \"(.*)\",?/g);
+    const version = extractRegex(/\"version\": \"(.*)\",?/g);
 
     return {
       accessToken,
@@ -228,7 +353,11 @@ export class AmazonBackgroundController implements BackgroundController {
     };
   }
 
-  private _createBodyHeaders(config: AmznMusic['appConfig'], query: string) {
+  private _createBodyHeaders(
+    config: AmznMusic['appConfig'],
+    query: string,
+    domain: string
+  ) {
     const csrf = JSON.stringify({
       interface: 'CSRFInterface.v1_0.CSRFHeaderElement',
       token: config.csrf.token,
@@ -246,14 +375,14 @@ export class AmazonBackgroundController implements BackgroundController {
       'x-amzn-device-family': 'WebPlayer',
       'x-amzn-device-height': '1080',
       'x-amzn-device-id': config.sessionId,
-      'x-amzn-device-language': config.displayLanguage,
+      'x-amzn-device-language': config.displayLanguage || 'en-US',
       'x-amzn-device-model': 'WEBPLAYER',
       'x-amzn-device-time-zone': 'America/Los_Angeles',
       'x-amzn-device-width': '1920',
       'x-amzn-feature-flags': 'hd-supported,uhd-supported',
-      'x-amzn-music-domain': 'music.amazon.com',
+      'x-amzn-music-domain': domain,
       'x-amzn-os-version': '1.0',
-      'x-amzn-page-url': `https://music.amazon.com/search/${query.replaceAll(
+      'x-amzn-page-url': `https://${domain}/search/${query.replaceAll(
         ' ',
         '+'
       )}?filter=IsLibrary%257Cfalse&sc=none`,

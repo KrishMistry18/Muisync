@@ -4,7 +4,14 @@ import type { StoreEnhancerStoreCreator } from 'redux';
 import { type StoreEnhancer } from 'redux';
 
 export const config: PlasmoCSConfig = {
-  matches: ['*://music.amazon.com/*'],
+  matches: [
+    '*://music.amazon.com/*',
+    '*://music.amazon.co.uk/*',
+    '*://music.amazon.ca/*',
+    '*://music.amazon.in/*',
+    '*://music.amazon.com.au/*',
+    '*://music.amazon.co.jp/*'
+  ],
   all_frames: true,
   world: 'MAIN',
   run_at: 'document_start'

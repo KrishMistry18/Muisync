@@ -25,7 +25,12 @@ export const config: PlasmoCSConfig = {
     '*://music.apple.com/*',
     '*://open.spotify.com/*',
     '*://music.youtube.com/*',
-    '*://music.amazon.com/*'
+    '*://music.amazon.com/*',
+    '*://music.amazon.co.uk/*',
+    '*://music.amazon.ca/*',
+    '*://music.amazon.in/*',
+    '*://music.amazon.com.au/*',
+    '*://music.amazon.co.jp/*'
   ],
   all_frames: true
 };

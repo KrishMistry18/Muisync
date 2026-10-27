@@ -1,5 +1,6 @@
 import AmazonLogo from 'data-base64:~assets/images/amazon-logo.svg';
 
+import { AMAZON_MUSIC_URL_MATCHES } from '~constants/urls';
 import type { ContentController, MusicServiceAdapter } from '~core/adapter';
 import { MUSIC_SERVICE } from '~types';
 
@@ -12,7 +13,7 @@ export const AmazonAdapter: MusicServiceAdapter = {
   id: MUSIC_SERVICE.AMAZONMUSIC,
   baseUrl: 'https://music.amazon.com/',
   icon: AmazonLogo,
-  urlMatches: ['*://music.amazon.com/*'],
+  urlMatches: AMAZON_MUSIC_URL_MATCHES,
   disabledFeatures: ['like', 'dislike'],
   enabledKeyControls: {
     volumeDown: true,

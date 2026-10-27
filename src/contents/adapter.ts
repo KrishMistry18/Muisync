@@ -7,6 +7,11 @@ import { matchAdapter } from '~core/adapter/register';
 export const config: PlasmoCSConfig = {
   matches: [
     '*://music.amazon.com/*',
+    '*://music.amazon.co.uk/*',
+    '*://music.amazon.ca/*',
+    '*://music.amazon.in/*',
+    '*://music.amazon.com.au/*',
+    '*://music.amazon.co.jp/*',
     '*://music.apple.com/*',
     '*://open.spotify.com/*',
     '*://music.youtube.com/*'
