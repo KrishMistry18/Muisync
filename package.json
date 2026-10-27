@@ -75,9 +75,11 @@
       "storage"
     ],
     "optional_host_permissions": [
-      "https://*/*",
-      "*://*/*",
-      "<all_urls>"
+      "https://open.spotify.com/*",
+      "https://music.apple.com/*",
+      "https://music.youtube.com/*",
+      "https://music.amazon.com/*",
+      "https://www.synqapp.io/*"
     ],
     "optional_permissions": [
       "tabs",
